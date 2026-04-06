@@ -24,6 +24,15 @@ jobs:
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Verify REPO2_PAT secret is configured
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::The REPO2_PAT secret is not configured. Please add a Personal Access Token with 'repo' scope to this repository's secrets under the name REPO2_PAT."
+            exit 1
+          fi
+        env:
+          PAT: ${{ secrets.REPO2_PAT }}
+
       - name: Checkout repo-2
         uses: actions/checkout@v4
         with:
