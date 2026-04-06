@@ -1,0 +1,59 @@
+name: Update Changelog in repo-2
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  update-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo-1
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get commit messages from this push
+        id: commits
+        run: |
+          # Collect all commit messages introduced by this push
+          COMMITS=$(git log --pretty=format:"- %s (%h) by %an on %ad" --date=short ${{ github.event.before }}..${{ github.sha }} 2>/dev/null || \
+                    git log --pretty=format:"- %s (%h) by %an on %ad" --date=short -1)
+          echo "COMMITS<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Checkout repo-2
+        uses: actions/checkout@v4
+        with:
+          repository: gesiud/repo-2
+          token: ${{ secrets.REPO2_PAT }}
+          path: repo-2
+
+      - name: Update changelog.md in repo-2
+        run: |
+          cd repo-2
+          DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          BRANCH="${{ github.ref_name }}"
+          REPO="repo-1"
+
+          # Create changelog.md if it doesn't exist
+          if [ ! -f changelog.md ]; then
+            echo "# Changelog" > changelog.md
+            echo "" >> changelog.md
+          fi
+
+          # Prepend new entries after the first line (the title)
+          ENTRY="\n## [$REPO] $DATE (branch: \`$BRANCH\`)\n\n${{ steps.commits.outputs.COMMITS }}\n"
+          # Insert entry after the first line using awk
+          awk -v entry="$ENTRY" 'NR==1{print; print entry; next}1' changelog.md > changelog.tmp && mv changelog.tmp changelog.md
+
+      - name: Commit and push changelog.md to repo-2
+        run: |
+          cd repo-2
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add changelog.md
+          git diff --cached --quiet || git commit -m "chore: update changelog from repo-1 commit(s) [${{ github.sha }}]"
+          git push
