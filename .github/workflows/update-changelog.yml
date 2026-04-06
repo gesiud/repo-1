@@ -58,11 +58,30 @@ jobs:
           # Insert entry after the first line using awk
           awk -v entry="$ENTRY" 'NR==1{print; print entry; next}1' changelog.md > changelog.tmp && mv changelog.tmp changelog.md
 
-      - name: Commit and push changelog.md to repo-2
+      - name: Create PR with changelog update to repo-2 master
         run: |
           cd repo-2
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Skip if there are no changes
           git add changelog.md
-          git diff --cached --quiet || git commit -m "chore: update changelog from repo-1 commit(s) [${{ github.sha }}]"
-          git push
+          if git diff --cached --quiet; then
+            echo "No changelog changes to commit."
+            exit 0
+          fi
+
+          BRANCH="changelog/repo-1-${{ github.sha }}"
+          git checkout -b "$BRANCH"
+          git commit -m "chore: update changelog from repo-1 commit(s) [${{ github.sha }}]"
+          git push origin "$BRANCH"
+
+          # Create a pull request targeting master
+          gh pr create \
+            --repo gesiud/repo-2 \
+            --base master \
+            --head "$BRANCH" \
+            --title "chore: update changelog from repo-1 [${{ github.ref_name }}]" \
+            --body "Automated changelog update from [repo-1](https://github.com/gesiud/repo-1) push on branch \`${{ github.ref_name }}\` (commit \`${{ github.sha }}\`)."
+        env:
+          GH_TOKEN: ${{ secrets.REPO2_PAT }}
