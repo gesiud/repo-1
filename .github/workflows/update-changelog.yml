@@ -40,12 +40,24 @@ jobs:
           token: ${{ secrets.REPO2_PAT }}
           path: repo-2
 
-      - name: Update changelog.md in repo-2
+      - name: Create or update PR with changelog update to repo-2 master
         run: |
           cd repo-2
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          CHANGELOG_BRANCH="changelog"
           DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          BRANCH="${{ github.ref_name }}"
+          SOURCE_BRANCH="${{ github.ref_name }}"
           REPO="repo-1"
+
+          # Switch to existing changelog branch or create it from master
+          if git ls-remote --exit-code --heads origin "$CHANGELOG_BRANCH" > /dev/null 2>&1; then
+            git fetch origin "$CHANGELOG_BRANCH"
+            git checkout -b "$CHANGELOG_BRANCH" "origin/$CHANGELOG_BRANCH"
+          else
+            git checkout -b "$CHANGELOG_BRANCH"
+          fi
 
           # Create changelog.md if it doesn't exist
           if [ ! -f changelog.md ]; then
@@ -53,16 +65,9 @@ jobs:
             echo "" >> changelog.md
           fi
 
-          # Prepend new entries after the first line (the title)
-          ENTRY="\n## [$REPO] $DATE (branch: \`$BRANCH\`)\n\n${{ steps.commits.outputs.COMMITS }}\n"
-          # Insert entry after the first line using awk
+          # Prepend new entry after the first line (the title)
+          ENTRY="\n## [$REPO] $DATE (branch: \`$SOURCE_BRANCH\`)\n\n${{ steps.commits.outputs.COMMITS }}\n"
           awk -v entry="$ENTRY" 'NR==1{print; print entry; next}1' changelog.md > changelog.tmp && mv changelog.tmp changelog.md
-
-      - name: Create PR with changelog update to repo-2 master
-        run: |
-          cd repo-2
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
 
           # Skip if there are no changes
           git add changelog.md
@@ -71,17 +76,28 @@ jobs:
             exit 0
           fi
 
-          BRANCH="changelog/repo-1-${{ github.sha }}"
-          git checkout -b "$BRANCH"
           git commit -m "chore: update changelog from repo-1 commit(s) [${{ github.sha }}]"
-          git push origin "$BRANCH"
+          git push origin "$CHANGELOG_BRANCH"
 
-          # Create a pull request targeting master
-          gh pr create \
+          # Open a PR only if one does not already exist for this branch
+          EXISTING_PR=$(gh pr list \
             --repo gesiud/repo-2 \
             --base master \
-            --head "$BRANCH" \
-            --title "chore: update changelog from repo-1 [${{ github.ref_name }}]" \
-            --body "Automated changelog update from [repo-1](https://github.com/gesiud/repo-1) push on branch \`${{ github.ref_name }}\` (commit \`${{ github.sha }}\`)."
+            --head "$CHANGELOG_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -z "$EXISTING_PR" ]; then
+            gh pr create \
+              --repo gesiud/repo-2 \
+              --base master \
+              --head "$CHANGELOG_BRANCH" \
+              --title "chore: update changelog from repo-1" \
+              --body "Automated changelog updates from [repo-1](https://github.com/gesiud/repo-1). New entries will be appended to this PR until it is merged."
+            echo "PR created."
+          else
+            echo "PR #$EXISTING_PR already exists — new commit added to it."
+          fi
         env:
           GH_TOKEN: ${{ secrets.REPO2_PAT }}
